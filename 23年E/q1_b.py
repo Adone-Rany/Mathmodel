@@ -1,3 +1,4 @@
+# LightGBM 模型训练，效果一般
 import pandas as pd
 import lightgbm as lgb
 from sklearn.model_selection import train_test_split

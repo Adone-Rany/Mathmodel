@@ -1,4 +1,5 @@
-# 探索聚类数
+# 将五个聚类患者数据保存到表格
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -281,6 +282,90 @@ print(output_df.head(20).to_string(index=False))
 output_filename = 'kmeans_2D_clustering_results.xlsx'
 output_df.to_excel(output_filename, index=False)
 print(f"\n完整聚类结果已保存到: {output_filename}")
+
+# =================== 新增功能：分别保存五个聚类的完整数据 ===================
+
+print(f"\n开始为k=5聚类的每个聚类创建完整数据表格...")
+
+# 获取k=5时的聚类结果
+k5_labels = evaluation_metrics[5]['labels']
+
+# 将聚类标签合并到原始数据
+# 首先创建患者ID到聚类标签的映射
+patient_cluster_mapping = dict(zip(clustering_data['patient_id'], k5_labels))
+
+# 为原始数据添加聚类标签
+df_subset_with_cluster = df_subset.copy()
+df_subset_with_cluster['聚类标签'] = df_subset_with_cluster['患者id'].map(patient_cluster_mapping)
+
+# 只保留有聚类标签的患者（即参与聚类的患者）
+df_clustered = df_subset_with_cluster.dropna(subset=['聚类标签']).copy()
+df_clustered['聚类标签'] = df_clustered['聚类标签'].astype(int)
+
+print(f"参与聚类的患者总数: {len(df_clustered)}")
+print(f"各聚类患者分布:")
+cluster_distribution = df_clustered['聚类标签'].value_counts().sort_index()
+for cluster_id, count in cluster_distribution.items():
+    print(f"  聚类 {cluster_id}: {count} 名患者")
+
+# 使用ExcelWriter创建多工作表Excel文件
+with pd.ExcelWriter('五个聚类患者完整数据.xlsx', engine='openpyxl') as writer:
+    # 为每个聚类创建单独的工作表
+    for cluster_id in range(5):
+        cluster_patients = df_clustered[df_clustered['聚类标签'] == cluster_id].copy()
+
+        # 按患者ID排序
+        cluster_patients = cluster_patients.sort_values('患者id')
+
+        # 移除聚类标签列（因为每个表格都是同一聚类）
+        cluster_patients_clean = cluster_patients.drop(columns=['聚类标签'])
+
+        # 写入到对应的工作表
+        sheet_name = f'聚类{cluster_id}'
+        cluster_patients_clean.to_excel(writer, sheet_name=sheet_name, index=False)
+
+        print(f"聚类 {cluster_id} 数据已保存到工作表 '{sheet_name}' (共 {len(cluster_patients_clean)} 名患者)")
+
+# 另外，也为每个聚类创建单独的Excel文件
+for cluster_id in range(5):
+    cluster_patients = df_clustered[df_clustered['聚类标签'] == cluster_id].copy()
+    cluster_patients = cluster_patients.sort_values('患者id')
+    cluster_patients_clean = cluster_patients.drop(columns=['聚类标签'])
+
+    filename = f'聚类{cluster_id}_患者数据.xlsx'
+    cluster_patients_clean.to_excel(filename, index=False)
+    print(f"聚类 {cluster_id} 单独文件已保存: {filename} (共 {len(cluster_patients_clean)} 名患者)")
+
+# 创建聚类汇总信息表
+cluster_summary = []
+for cluster_id in range(5):
+    cluster_data = clustering_data[clustering_data['cluster'] == cluster_id]
+    center = cluster_centers_original[cluster_id]
+
+    summary_info = {
+        '聚类标签': cluster_id,
+        '患者数量': len(cluster_data),
+        '百分比': f"{(len(cluster_data) / len(clustering_data)) * 100:.1f}%",
+        '中心_时间(小时)': f"{center[0]:.1f}",
+        '中心_体积': f"{center[1]:.2f}",
+        '时间_均值': f"{cluster_data['final_time_hours'].mean():.1f}",
+        '时间_标准差': f"{cluster_data['final_time_hours'].std():.1f}",
+        '时间_范围': f"[{cluster_data['final_time_hours'].min():.1f}, {cluster_data['final_time_hours'].max():.1f}]",
+        '体积_均值': f"{cluster_data['final_volume'].mean():.2f}",
+        '体积_标准差': f"{cluster_data['final_volume'].std():.2f}",
+        '体积_范围': f"[{cluster_data['final_volume'].min():.2f}, {cluster_data['final_volume'].max():.2f}]"
+    }
+    cluster_summary.append(summary_info)
+
+cluster_summary_df = pd.DataFrame(cluster_summary)
+cluster_summary_df.to_excel('聚类汇总信息.xlsx', index=False)
+print(f"\n聚类汇总信息已保存到: 聚类汇总信息.xlsx")
+
+print(f"\n=== 文件保存汇总 ===")
+print(f"1. 五个聚类患者完整数据.xlsx - 包含5个工作表的综合文件")
+print(f"2. 聚类0_患者数据.xlsx 到 聚类4_患者数据.xlsx - 5个单独的聚类文件")
+print(f"3. 聚类汇总信息.xlsx - 各聚类的统计汇总")
+print(f"4. kmeans_2D_clustering_results.xlsx - 原有的聚类结果文件")
 
 # 统计各聚类的患者分布
 print(f"\n聚类标签分布:")

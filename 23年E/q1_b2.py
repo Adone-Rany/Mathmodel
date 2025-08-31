@@ -1,3 +1,4 @@
+# 随机森林，效果最好
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier

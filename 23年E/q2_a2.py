@@ -64,9 +64,6 @@ for idx, row in df_subset.iterrows():
                         time_diff = followup_time - onset_time
                         hours_from_onset = time_diff.total_seconds() / 3600
 
-                        # if hours_from_onset >1500:
-                        #     print(f"患者 {patient_id} 的第 {i} 次检查时间超过1000小时")
-
                         time_points.append(hours_from_onset)
                         volume_values.append(row[volume_col])
                         patient_ids.append(patient_id)
@@ -122,39 +119,56 @@ print(f"  最大值: {volume_values.max():.1f}")
 print(f"  平均值: {volume_values.mean():.1f}")
 print(f"  中位数: {np.median(volume_values):.1f}")
 
-# 可选：添加多项式拟合曲线
+# 可选：添加最小二乘法多项式拟合
 from scipy import stats
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import r2_score, mean_squared_error
 
 if len(time_points) > 1:
-    # 尝试不同阶数的多项式拟合
-    degrees = [1, 2, 3, 4]  # 1次到4次多项式
+    # 尝试不同阶数的多项式拟合（最小二乘法）
+    degrees = [1, 2]  # 1次到4次多项式
     best_degree = 1
     best_r2 = 0
 
     plt.figure(figsize=(15, 10))
 
     # 创建子图比较不同阶数的拟合效果
-    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     axes = axes.flatten()
 
     polynomial_results = {}
 
+    # 准备数据
+    X = time_points.reshape(-1, 1)
+    y = volume_values
+
     for i, degree in enumerate(degrees):
         if len(time_points) > degree:  # 确保数据点数量足够
-            # 多项式拟合
-            coeffs = np.polyfit(time_points, volume_values, degree)
-            poly_func = np.poly1d(coeffs)
+            # 使用sklearn进行最小二乘法多项式拟合
+            poly_pipeline = Pipeline([
+                ('poly', PolynomialFeatures(degree=degree)),
+                ('linear', LinearRegression())
+            ])
 
-            # 计算R²
-            y_pred = poly_func(time_points)
-            ss_res = np.sum((volume_values - y_pred) ** 2)
-            ss_tot = np.sum((volume_values - np.mean(volume_values)) ** 2)
-            r2 = 1 - (ss_res / ss_tot)
+            # 拟合模型
+            poly_pipeline.fit(X, y)
+
+            # 预测
+            y_pred = poly_pipeline.predict(X)
+
+            # 计算评估指标
+            r2 = r2_score(y, y_pred)
+            mse = mean_squared_error(y, y_pred)
+            rmse = np.sqrt(mse)
 
             polynomial_results[degree] = {
-                'coeffs': coeffs,
-                'poly_func': poly_func,
-                'r2': r2
+                'model': poly_pipeline,
+                'r2': r2,
+                'mse': mse,
+                'rmse': rmse,
+                'y_pred': y_pred
             }
 
             if r2 > best_r2:
@@ -166,12 +180,13 @@ if len(time_points) > 1:
 
             # 拟合曲线
             x_smooth = np.linspace(time_points.min(), time_points.max(), 200)
-            y_smooth = poly_func(x_smooth)
+            X_smooth = x_smooth.reshape(-1, 1)
+            y_smooth = poly_pipeline.predict(X_smooth)
             axes[i].plot(x_smooth, y_smooth, 'r-', linewidth=2)
 
             axes[i].set_xlabel('发病至影像检查时间 (小时)')
             axes[i].set_ylabel('水肿体积')
-            axes[i].set_title(f'{degree}次多项式拟合 (R²={r2:.4f})')
+            axes[i].set_title(f'{degree}次多项式拟合 (R²={r2:.4f}, RMSE={rmse:.2f})')
             axes[i].grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -182,42 +197,99 @@ if len(time_points) > 1:
     plt.scatter(time_points, volume_values, alpha=0.6, s=30, c='steelblue', edgecolors='none', label='数据点')
 
     # 使用最佳多项式拟合
-    best_poly = polynomial_results[best_degree]['poly_func']
+    best_model = polynomial_results[best_degree]['model']
     x_smooth = np.linspace(time_points.min(), time_points.max(), 200)
-    y_smooth = best_poly(x_smooth)
+    X_smooth = x_smooth.reshape(-1, 1)
+    y_smooth = best_model.predict(X_smooth)
     plt.plot(x_smooth, y_smooth, 'r-', linewidth=3,
              label=f'{best_degree}次多项式拟合 (R²={best_r2:.4f})')
 
+    # 计算并显示置信区间（可选）
+    residuals = volume_values - polynomial_results[best_degree]['y_pred']
+    std_residual = np.std(residuals)
+    y_upper = y_smooth + 1.96 * std_residual
+    y_lower = y_smooth - 1.96 * std_residual
+    plt.fill_between(x_smooth, y_lower, y_upper, alpha=0.2, color='red',
+                     label='95%置信区间')
+
     plt.xlabel('发病至影像检查时间 (小时)', fontsize=12)
     plt.ylabel('水肿体积 (ED_volume)', fontsize=12)
-    plt.title('前100名患者水肿体积随时间进展散点图（多项式拟合）', fontsize=14, fontweight='bold')
+    plt.title('前100名患者水肿体积随时间进展散点图（最小二乘法多项式拟合）', fontsize=14, fontweight='bold')
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
 
-    print(f"\n多项式拟合分析:")
+    print(f"\n最小二乘法多项式拟合分析:")
     print(f"最佳拟合阶数: {best_degree}")
     print(f"最佳R²值: {best_r2:.4f}")
 
     # 打印所有拟合结果
-    print(f"\n各阶数拟合结果:")
+    print(f"\n各阶数拟合结果 (最小二乘法):")
     for degree in degrees:
         if degree in polynomial_results:
-            r2 = polynomial_results[degree]['r2']
-            coeffs = polynomial_results[degree]['coeffs']
-            print(f"{degree}次多项式: R² = {r2:.4f}")
+            result = polynomial_results[degree]
+            print(f"{degree}次多项式:")
+            print(f"  R² = {result['r2']:.4f}")
+            print(f"  MSE = {result['mse']:.4f}")
+            print(f"  RMSE = {result['rmse']:.4f}")
+
+            # 获取多项式系数并构建方程
+            poly_features = PolynomialFeatures(degree=degree)
+            linear_reg = result['model'].named_steps['linear']
+            coefficients = linear_reg.coef_
+            intercept = linear_reg.intercept_
 
             # 构建多项式方程字符串
             equation = "y = "
-            for j, coeff in enumerate(coeffs):
-                power = len(coeffs) - 1 - j
-                if j > 0:
-                    equation += " + " if coeff >= 0 else " - "
-                    equation += f"{abs(coeff):.4f}"
-                else:
-                    equation += f"{coeff:.4f}"
+            if degree == 1:
+                equation += f"{coefficients[1]:.4f}x + {intercept:.4f}"
+            else:
+                # 对于高次多项式，系数顺序是 [intercept, x, x², x³, ...]
+                terms = []
+                for j in range(len(coefficients)):
+                    coef = coefficients[j]
+                    if j == 0:  # 常数项已经在intercept中
+                        continue
+                    elif j == 1:  # x项
+                        if abs(coef) > 1e-10:  # 避免显示很小的系数
+                            terms.append(f"{coef:.4f}x")
+                    else:  # x^n项
+                        if abs(coef) > 1e-10:
+                            terms.append(f"{coef:.4f}x^{j}")
 
-                if power > 0:
-                    equation += f"x^{power}" if power > 1 else "x"
-            print(f"   方程: {equation}")
+                if intercept != 0:
+                    terms.append(f"{intercept:.4f}")
 
+                equation += " + ".join(terms).replace("+ -", "- ")
+
+            print(f"  方程: {equation}")
+            print()
+
+    # 残差分析
+    best_residuals = volume_values - polynomial_results[best_degree]['y_pred']
+
+    # 绘制残差图
+    plt.figure(figsize=(12, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.scatter(time_points, best_residuals, alpha=0.6, s=30, c='green')
+    plt.axhline(y=0, color='r', linestyle='--', alpha=0.8)
+    plt.xlabel('发病至影像检查时间 (小时)')
+    plt.ylabel('残差')
+    plt.title(f'{best_degree}次多项式拟合残差图')
+    plt.grid(True, alpha=0.3)
+
+    plt.subplot(1, 2, 2)
+    plt.hist(best_residuals, bins=20, alpha=0.7, color='green', edgecolor='black')
+    plt.xlabel('残差值')
+    plt.ylabel('频数')
+    plt.title('残差分布直方图')
+    plt.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
+
+    print(f"残差统计:")
+    print(f"残差均值: {np.mean(best_residuals):.4f}")
+    print(f"残差标准差: {np.std(best_residuals):.4f}")
+    print(f"残差范围: [{np.min(best_residuals):.4f}, {np.max(best_residuals):.4f}]")
